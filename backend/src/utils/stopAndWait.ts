@@ -8,7 +8,6 @@ export async function stopAndWait<T>(
   let attempt = 0;
   let delay = intervalMs;
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     attempt++;
     try {
