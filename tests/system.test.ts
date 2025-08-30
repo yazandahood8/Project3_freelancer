@@ -4,20 +4,21 @@ import '../src/app.js';
 
 const base = `http://localhost:${config.port}`;
 
-describe('System happy flow', () => {
-  test('create -> list -> delete', async () => {
+describe('System flow', () => {
+  test('create -> list (filtered) -> toggle -> delete', async () => {
     const create = await request(base).post('/api/rules').send({
-      source_ip: '1.1.1.1',
-      dest_ip: '8.8.4.4',
-      port: 8080,
-      protocol: 'tcp',
-      action: 'allow'
+      type: 'cidr', value: '192.168.1.0/24', mode: 'blacklist'
     });
     expect(create.status).toBe(201);
 
-    const list = await request(base).get('/api/rules');
+    const list = await request(base).get('/api/rules?type=cidr&mode=blacklist');
+    expect(list.status).toBe(200);
     const found = list.body.find((r: any) => r.id === create.body.id);
     expect(found).toBeTruthy();
+
+    const toggle = await request(base).patch(`/api/rules/${create.body.id}/active`).send({ active: false });
+    expect(toggle.status).toBe(200);
+    expect(toggle.body.active).toBe(false);
 
     const del = await request(base).delete(`/api/rules/${create.body.id}`);
     expect(del.status).toBe(204);

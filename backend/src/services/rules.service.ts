@@ -1,33 +1,68 @@
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { getDb } from './db/client.js';
-import type { Rule } from './db/schema.js';
+import { rules, RuleRow } from './db/schema.js';
 import type { RuleInput } from '../types/rule.js';
 
-export async function listRules(): Promise<Rule[]> {
+export async function listRules(filters?: { type?: string; mode?: string; active?: boolean }): Promise<RuleRow[]> {
   const db = await getDb();
-  const { rows } = await db.query('SELECT * FROM rules ORDER BY id ASC');
+  const where = [];
+  if (filters?.type) where.push(eq(rules.type, filters.type as any));
+  if (filters?.mode) where.push(eq(rules.mode, filters.mode as any));
+  if (typeof filters?.active === 'boolean') where.push(eq(rules.active, filters.active));
+  const rows = await db.select().from(rules).where(where.length ? and(...where) : undefined).orderBy(asc(rules.id));
   return rows;
 }
 
-export async function createRule(input: RuleInput): Promise<Rule> {
+export async function createRule(input: RuleInput): Promise<RuleRow> {
   const db = await getDb();
-  const { rows } = await db.query(
-    `INSERT INTO rules (source_ip, dest_ip, port, protocol, action)
-     VALUES ($1,$2,$3,$4,$5)
-     ON CONFLICT (source_ip, dest_ip, port, protocol) DO NOTHING
-     RETURNING *`,
-    [input.source_ip, input.dest_ip, input.port, input.protocol, input.action]
-  );
-  if (!rows[0]) {
-    // כפילות
-    throw Object.assign(new Error('Duplicate rule'), { status: 409 });
-  }
-  return rows[0];
+  const [row] = await db.insert(rules).values({
+    value: input.value,
+    type: input.type as any,
+    mode: input.mode as any,
+    active: input.active ?? true
+  }).onConflictDoNothing({ target: [rules.value, rules.type] }).returning();
+  if (!row) throw Object.assign(new Error('Duplicate rule'), { status: 409 });
+  return row;
+}
+
+export async function createRulesBatch(inputs: RuleInput[]): Promise<{ created: RuleRow[]; duplicates: number }>{
+  const db = await getDb();
+  const values = inputs.map(i => ({
+    value: i.value, type: i.type as any, mode: i.mode as any, active: i.active ?? true
+  }));
+  const created = await db.insert(rules).values(values)
+    .onConflictDoNothing({ target: [rules.value, rules.type] })
+    .returning();
+  const duplicates = inputs.length - created.length;
+  return { created, duplicates };
+}
+
+export async function toggleRule(id: number, active: boolean): Promise<RuleRow> {
+  const db = await getDb();
+  const [row] = await db.update(rules).set({ active }).where(eq(rules.id, id)).returning();
+  if (!row) throw Object.assign(new Error('Rule not found'), { status: 404 });
+  return row;
+}
+
+export async function toggleRulesBatch(ids: number[], active: boolean): Promise<number> {
+  const db = await getDb();
+  const res = await db.update(rules).set({ active }).where(inArray(rules.id, ids));
+  // drizzle update returns { rowCount? } depending on driver; we can re-select:
+  const affected = (await db.select().from(rules).where(inArray(rules.id, ids))).length;
+  return affected;
 }
 
 export async function deleteRule(id: number): Promise<void> {
   const db = await getDb();
-  const { rowCount } = await db.query('DELETE FROM rules WHERE id=$1', [id]);
-  if (!rowCount) {
-    throw Object.assign(new Error('Rule not found'), { status: 404 });
-  }
+  const res = await db.delete(rules).where(eq(rules.id, id));
+  // no row? surface 404
+  const left = await db.select().from(rules).where(eq(rules.id, id));
+  if (left.length) throw Object.assign(new Error('Delete failed'), { status: 500 });
+}
+
+export async function deleteRulesBatch(ids: number[]): Promise<number> {
+  const db = await getDb();
+  const before = await db.select({ id: rules.id }).from(rules).where(inArray(rules.id, ids));
+  await db.delete(rules).where(inArray(rules.id, ids));
+  return before.length;
 }

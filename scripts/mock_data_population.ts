@@ -1,39 +1,32 @@
 import 'dotenv/config';
 import { faker } from '@faker-js/faker';
-import { Pool } from 'pg';
-import { config } from '../src/config/env.js';
-import { ensureSchema } from '../src/services/db/init.js';
+import { getDb } from '../src/services/db/client.js';
+import { rules } from '../src/services/db/schema.js';
 
-// Stage 3: Populate dev DB (10 מכל סוג, כולל Edge-cases חוקיים בלבד). :contentReference[oaicite:13]{index=13}
+function randomDom() { return faker.internet.domainName(); }
+function randomUrl() { return `https://${randomDom()}/${faker.word.sample()}`; }
 function randomIp() {
-  // IPv4
   return [0,0,0,0].map(() => faker.number.int({ min: 1, max: 254 })).join('.');
 }
-function randomProtocol() { return faker.helpers.arrayElement(['tcp','udp']); }
-function randomAction() { return faker.helpers.arrayElement(['allow','deny']); }
-
-async function run() {
-  const pool = new Pool({ connectionString: config.dbUri });
-  await ensureSchema(pool);
-
-  // 10 חוקים תקינים (מגוון פרוטוקולים/אקשן/פורט)
-  for (let i = 0; i < 10; i++) {
-    const src = randomIp();
-    const dst = randomIp();
-    const port = faker.number.int({ min: 1, max: 65535 });
-    const protocol = randomProtocol();
-    const action = randomAction();
-
-    await pool.query(
-      `INSERT INTO rules (source_ip, dest_ip, port, protocol, action)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT DO NOTHING`,
-      [src, dst, port, protocol, action]
-    );
-  }
-
-  await pool.end();
-  console.log('✅ Mock data populated');
+function randomCidr() {
+  const base = [0,0,0,0].map(() => faker.number.int({ min: 0, max: 255 })).join('.');
+  const mask = faker.number.int({ min: 8, max: 30 });
+  return `${base}/${mask}`;
 }
 
+async function run() {
+  const db = await getDb();
+
+  const data = [
+    { type: 'domain', value: randomDom(), mode: 'whitelist', active: true },
+    { type: 'url', value: randomUrl(), mode: 'blacklist', active: true },
+    { type: 'ip', value: randomIp(), mode: 'whitelist', active: true },
+    { type: 'cidr', value: randomCidr(), mode: 'blacklist', active: true },
+    { type: 'port', value: String(faker.number.int({min:1,max:65535})), mode: 'whitelist', active: true }
+  ];
+
+  await db.insert(rules).values(data).onConflictDoNothing({ target: [rules.value, rules.type] });
+
+  console.log('✅ Seeded mock rules');
+}
 run().catch(e => { console.error(e); process.exit(1); });

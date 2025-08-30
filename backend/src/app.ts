@@ -6,10 +6,9 @@ import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { getDb } from './services/db/client.js';
 
-// Stage 2: app.ts כנקודת כניסה + טעינת קונפיג/לוג/מידלוור/ראוטים. :contentReference[oaicite:12]{index=12}
 async function main() {
   const log = getLogger();
-  await getDb(); // מחבר DB לפני האזנה
+  await getDb(); // connect/ensure schema
 
   const app = express();
   app.use(express.json());
@@ -17,12 +16,6 @@ async function main() {
   app.use('/api', api);
   app.use(errorHandler);
 
-  app.listen(config.port, () => {
-    log.info(`🚀 Server listening on :${config.port} [${config.env}]`);
-  });
+  app.listen(config.port, () => log.info(`🚀 Server listening on :${config.port} [${config.env}]`));
 }
-
-main().catch(e => {
-  console.error(e);
-  process.exit(1);
-});
+main().catch(e => { console.error(e); process.exit(1); });

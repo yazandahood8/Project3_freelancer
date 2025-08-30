@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
-// Stage 2: זיהוי/ולידציית ENV ויצוא config גמיש לפי סביבה. :contentReference[oaicite:6]{index=6}
 const envSchema = z.object({
   ENV: z.enum(['dev', 'production']),
   PORT: z.coerce.number().int().min(1).max(65535),
